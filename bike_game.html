@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TiltRide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #05050f;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    overflow: hidden;
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  #wrap {
+    position: relative;
+    display: flex;
+    gap: 28px;
+    align-items: flex-start;
+  }
+
+  canvas {
+    display: block;
+    border: 1px solid #1a1a3a;
+    box-shadow: 0 0 60px rgba(0,200,255,0.08), 0 0 2px rgba(0,200,255,0.3);
+  }
+
+  /* ── Side panel ── */
+  #panel {
+    width: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding-top: 4px;
+    color: #8899bb;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .stat-block { display: flex; flex-direction: column; gap: 4px; }
+  .stat-label { color: #445; font-size: 10px; }
+  .stat-value {
+    font-family: 'Bebas Neue', monospace;
+    font-size: 38px;
+    color: #00ccff;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    text-shadow: 0 0 20px rgba(0,200,255,0.5);
+  }
+  .stat-unit { font-size: 10px; color: #556; margin-top: -2px; }
+
+  .divider { height: 1px; background: #111133; }
+
+  /* IMU status */
+  #imu-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+  }
+  #imu-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #e74c3c;
+    box-shadow: 0 0 8px #e74c3c;
+    flex-shrink: 0;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  #imu-dot.connected { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
+
+  /* Tilt meter */
+  #tilt-wrap { display: flex; flex-direction: column; gap: 8px; }
+  #tilt-bar-bg {
+    height: 6px;
+    background: #0d0d22;
+    border-radius: 3px;
+    border: 1px solid #1a1a44;
+    position: relative;
+    overflow: visible;
+  }
+  #tilt-bar-fill {
+    position: absolute;
+    top: 0; height: 100%;
+    background: #00ccff;
+    border-radius: 3px;
+    transition: width 0.05s, left 0.05s;
+  }
+  #tilt-center {
+    position: absolute;
+    left: 50%; top: -3px;
+    width: 1px; height: 12px;
+    background: #334;
+  }
+  #tilt-dot {
+    position: absolute;
+    top: 50%; transform: translateY(-50%);
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: #00ccff;
+    box-shadow: 0 0 10px #00ccff;
+    transition: left 0.05s;
+    margin-left: -6px;
+  }
+  #tilt-labels {
+    display: flex;
+    justify-content: space-between;
+    color: #334;
+    font-size: 9px;
+  }
+
+  /* Lives */
+  #lives-row { display: flex; gap: 6px; align-items: center; }
+  .life-icon { font-size: 16px; opacity: 1; }
+  .life-icon.dead { opacity: 0.15; }
+
+  /* Controls hint */
+  #hint {
+    font-size: 9px;
+    color: #334;
+    line-height: 1.6;
+  }
+  #hint span { color: #556; }
+
+  /* Invert toggle */
+  #invert-btn {
+    background: #0a0a20;
+    border: 1px solid #1a1a44;
+    color: #556;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 6px 10px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 2px;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  #invert-btn:hover { border-color: #00ccff66; color: #00ccff; }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <div id="panel">
+    <div class="stat-block">
+      <div class="stat-label">Speed</div>
+      <div class="stat-value" id="spd">0</div>
+      <div class="stat-unit">km / h</div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Score</div>
+      <div class="stat-value" id="scr" style="font-size:28px">0</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+      <div class="stat-label" style="margin-bottom:8px">Lives</div>
+      <div id="lives-row">
+        <span class="life-icon" id="l1">🏍</span>
+        <span class="life-icon" id="l2">🏍</span>
+        <span class="life-icon" id="l3">🏍</span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div id="tilt-wrap">
+      <div class="stat-label">Tilt</div>
+      <div id="tilt-bar-bg">
+        <div id="tilt-center"></div>
+        <div id="tilt-bar-fill"></div>
+        <div id="tilt-dot"></div>
+      </div>
+      <div id="tilt-labels"><span>◄ L</span><span>R ►</span></div>
+      <div style="color:#445; font-size:10px; text-align:center" id="tilt-val">—</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div id="imu-status">
+      <div id="imu-dot"></div>
+      <span id="imu-label">Keyboard mode</span>
+    </div>
+
+    <button id="invert-btn" onclick="invertTilt()">⇄ Flip tilt</button>
+
+    <div id="hint">
+      <span>TILT</span> Mac to steer<br>
+      <span>ARROW KEYS</span> fallback<br>
+      <span>SPACE</span> restart<br>
+      <span>[I]</span> invert tilt
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Canvas setup ──────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+
+canvas.width  = 420;
+canvas.height = 700;
+
+// ── Road geometry ─────────────────────────────────────────────────────────────
+const ROAD_L     = 70;
+const ROAD_R     = 350;
+const ROAD_W     = ROAD_R - ROAD_L;   // 280
+const LANE_COUNT = 4;
+const LANE_W     = ROAD_W / LANE_COUNT; // 70
+const LANE_CX    = (l) => ROAD_L + (l + 0.5) * LANE_W;
+
+// ── Bike ──────────────────────────────────────────────────────────────────────
+const BIKE_W = 24;
+const BIKE_H = 44;
+let   bikeX  = canvas.width / 2;
+const bikeY  = canvas.height - 90;
+let   bikeVX = 0;
+let   bikeLean = 0;   // visual lean, degrees
+
+// ── IMU ───────────────────────────────────────────────────────────────────────
+let tiltAngle   = 0;      // degrees, from server
+let imuConnected= false;
+let invertSign  = 1;      // 1 or -1
+
+// ── Game state ────────────────────────────────────────────────────────────────
+const STATES = { MENU: 0, PLAYING: 1, DEAD: 2, GAMEOVER: 3 };
+let state     = STATES.MENU;
+let score     = 0;
+let lives     = 3;
+let gameSpeed = 3.5;
+let frameN    = 0;
+let hitFlash  = 0;        // frames of red flash after collision
+
+// ── Road scroll ───────────────────────────────────────────────────────────────
+let dashOffset = 0;
+const DASH_PERIOD = 80;
+
+// ── Cars ──────────────────────────────────────────────────────────────────────
+let cars = [];
+let spawnTimer = 0;
+
+const CAR_PALETTE = [
+  '#c0392b','#e67e22','#27ae60','#2980b9',
+  '#8e44ad','#16a085','#d35400','#2c3e50',
+];
+
+function laneX(lane) { return LANE_CX(lane); }
+
+function spawnCar() {
+  const lane  = Math.floor(Math.random() * LANE_COUNT);
+  const color = CAR_PALETTE[Math.floor(Math.random() * CAR_PALETTE.length)];
+  const speed = 0.5 + Math.random() * 0.4; // relative to gameSpeed
+  cars.push({ x: laneX(lane), y: -60, w: 38, h: 66, color, speed });
+}
+
+// ── Keyboard fallback ─────────────────────────────────────────────────────────
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === ' ')   handleSpace();
+  if (e.key === 'i' || e.key === 'I') invertTilt();
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+function invertTilt() { invertSign *= -1; }
+
+function handleSpace() {
+  if (state === STATES.MENU)    { state = STATES.PLAYING; }
+  if (state === STATES.GAMEOVER){ resetGame(); }
+}
+
+canvas.addEventListener('click', handleSpace);
+
+function resetGame() {
+  score     = 0;
+  lives     = 3;
+  gameSpeed = 3.5;
+  frameN    = 0;
+  bikeX     = canvas.width / 2;
+  bikeVX    = 0;
+  bikeLean  = 0;
+  cars      = [];
+  spawnTimer= 0;
+  dashOffset= 0;
+  hitFlash  = 0;
+  state     = STATES.PLAYING;
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+let ws = null;
+
+function connectWS() {
+  ws = new WebSocket('ws://localhost:8765');
+
+  ws.onopen = () => {
+    imuConnected = true;
+    document.getElementById('imu-dot').classList.add('connected');
+    document.getElementById('imu-label').textContent = 'IMU connected';
+  };
+
+  ws.onmessage = e => {
+    try {
+      const d = JSON.parse(e.data);
+      // d.roll is left/right tilt in degrees
+      tiltAngle = d.roll * invertSign;
+    } catch {}
+  };
+
+  ws.onclose = ws.onerror = () => {
+    imuConnected = false;
+    document.getElementById('imu-dot').classList.remove('connected');
+    document.getElementById('imu-label').textContent = 'Keyboard mode';
+    setTimeout(connectWS, 2500);
+  };
+}
+
+connectWS();
+
+// ── Update ────────────────────────────────────────────────────────────────────
+function update() {
+  if (state !== STATES.PLAYING) return;
+
+  frameN++;
+  gameSpeed = Math.min(18, 3.5 + frameN * 0.003);
+
+  // Road scroll
+  dashOffset = (dashOffset + gameSpeed) % DASH_PERIOD;
+
+  // ── Steer ──
+  const DEAD_ZONE = 3;     // degrees of dead zone
+  const MAX_TILT  = 28;    // tilt for full steer
+  let   steer     = 0;
+
+  if (imuConnected) {
+    const t = tiltAngle;
+    if (Math.abs(t) > DEAD_ZONE) {
+      steer = (t - Math.sign(t) * DEAD_ZONE) / (MAX_TILT - DEAD_ZONE);
+      steer = Math.max(-1, Math.min(1, steer));
+    }
+  } else {
+    if (keys['ArrowLeft'])  steer = -1;
+    if (keys['ArrowRight']) steer =  1;
+  }
+
+  const STEER_FORCE = 5.2;
+  bikeVX = bikeVX * 0.70 + steer * STEER_FORCE * 0.30;
+  bikeX += bikeVX;
+  bikeX  = Math.max(ROAD_L + BIKE_W / 2 + 4,
+                    Math.min(ROAD_R - BIKE_W / 2 - 4, bikeX));
+  bikeLean = -steer * 18;   // visual lean
+
+  // ── Spawn cars ──
+  spawnTimer++;
+  const interval = Math.max(28, 95 - frameN * 0.03);
+  if (spawnTimer >= interval) { spawnCar(); spawnTimer = 0; }
+
+  // ── Move cars ──
+  for (const c of cars) c.y += gameSpeed * c.speed;
+  cars = cars.filter(c => c.y < canvas.height + 80);
+
+  // ── Collision ──
+  if (hitFlash > 0) { hitFlash--; return; }   // brief invincibility after hit
+
+  for (let i = cars.length - 1; i >= 0; i--) {
+    const c = cars[i];
+    const dx = Math.abs(c.x - bikeX);
+    const dy = Math.abs(c.y - bikeY);
+    if (dx < (BIKE_W / 2 + c.w / 2 - 6) && dy < (BIKE_H / 2 + c.h / 2 - 8)) {
+      cars.splice(i, 1);
+      lives--;
+      hitFlash = 40;
+      if (lives <= 0) { state = STATES.GAMEOVER; }
+      break;
+    }
+  }
+
+  // ── Score ──
+  score += Math.round(gameSpeed * 0.15);
+}
+
+// ── Draw helpers ──────────────────────────────────────────────────────────────
+
+function drawBackground() {
+  // Sky / sides
+  ctx.fillStyle = '#07070f';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Subtle city glow on horizon
+  const horizGrad = ctx.createLinearGradient(0, 0, 0, 200);
+  horizGrad.addColorStop(0, 'rgba(20,10,60,0.4)');
+  horizGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = horizGrad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Side guard rail gradient
+  const sideL = ctx.createLinearGradient(0, 0, ROAD_L, 0);
+  sideL.addColorStop(0, '#07070f');
+  sideL.addColorStop(1, '#0c0c18');
+  ctx.fillStyle = sideL;
+  ctx.fillRect(0, 0, ROAD_L, canvas.height);
+
+  const sideR = ctx.createLinearGradient(ROAD_R, 0, canvas.width, 0);
+  sideR.addColorStop(0, '#0c0c18');
+  sideR.addColorStop(1, '#07070f');
+  ctx.fillStyle = sideR;
+  ctx.fillRect(ROAD_R, 0, canvas.width - ROAD_R, canvas.height);
+
+  // Guard rail lines
+  ctx.strokeStyle = '#1a1a33';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(ROAD_L - 8, 0); ctx.lineTo(ROAD_L - 8, canvas.height); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ROAD_R + 8, 0); ctx.lineTo(ROAD_R + 8, canvas.height); ctx.stroke();
+}
+
+function drawRoad() {
+  // Road surface
+  const roadGrad = ctx.createLinearGradient(ROAD_L, 0, ROAD_R, 0);
+  roadGrad.addColorStop(0,    '#111122');
+  roadGrad.addColorStop(0.15, '#181830');
+  roadGrad.addColorStop(0.85, '#181830');
+  roadGrad.addColorStop(1,    '#111122');
+  ctx.fillStyle = roadGrad;
+  ctx.fillRect(ROAD_L, 0, ROAD_W, canvas.height);
+
+  // Edge lines (yellow)
+  ctx.strokeStyle = '#c8a020';
+  ctx.lineWidth = 2.5;
+  ctx.shadowColor = '#c8a020';
+  ctx.shadowBlur  = 6;
+  ctx.beginPath(); ctx.moveTo(ROAD_L, 0); ctx.lineTo(ROAD_L, canvas.height); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ROAD_R, 0); ctx.lineTo(ROAD_R, canvas.height); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Dashed lane markers
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth   = 1.5;
+  ctx.setLineDash([36, 44]);
+  ctx.lineDashOffset = -dashOffset;
+
+  for (let i = 1; i < LANE_COUNT; i++) {
+    const x = ROAD_L + i * LANE_W;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, canvas.height);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.lineDashOffset = 0;
+}
+
+function drawCar(c) {
+  ctx.save();
+  ctx.translate(c.x, c.y);
+
+  const w = c.w, h = c.h;
+
+  // Drop shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur  = 10;
+  ctx.shadowOffsetY = 4;
+
+  // Body
+  ctx.fillStyle = c.color;
+  ctx.beginPath();
+  ctx.roundRect(-w/2, -h/2, w, h, 5);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  // Windshield
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath();
+  ctx.roundRect(-w/2+5, -h/2+10, w-10, 18, 3);
+  ctx.fill();
+
+  // Rear window
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.roundRect(-w/2+5, h/2-22, w-10, 14, 3);
+  ctx.fill();
+
+  // Tail lights
+  ctx.fillStyle = '#ff3333';
+  ctx.shadowColor = '#ff0000';
+  ctx.shadowBlur  = 12;
+  ctx.fillRect(-w/2+4, h/2-10, 9, 5);
+  ctx.fillRect(w/2-13, h/2-10, 9, 5);
+  ctx.shadowBlur = 0;
+
+  ctx.restore();
+}
+
+function drawBike() {
+  ctx.save();
+  ctx.translate(bikeX, bikeY);
+  ctx.rotate(bikeLean * Math.PI / 180);
+
+  // Hit flash (red tint)
+  const flashing = hitFlash > 0 && Math.floor(hitFlash / 4) % 2 === 0;
+
+  const glowColor = flashing ? '#ff4444' : '#00ccff';
+
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur  = 22;
+
+  // Rear wheel
+  ctx.fillStyle = '#0a0a18';
+  ctx.strokeStyle = flashing ? '#ff4444' : '#0077aa';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(0, BIKE_H/2 - 8, 11, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Front wheel
+  ctx.beginPath();
+  ctx.ellipse(0, -BIKE_H/2 + 8, 9, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Body
+  ctx.fillStyle = flashing ? '#ff5555' : '#00bbee';
+  ctx.beginPath();
+  ctx.roundRect(-BIKE_W/2, -BIKE_H/2+10, BIKE_W, BIKE_H-20, 7);
+  ctx.fill();
+
+  // Tank / seat ridge
+  ctx.fillStyle = flashing ? '#ff7777' : '#00ddff';
+  ctx.fillRect(-BIKE_W/2+4, -8, BIKE_W-8, 16);
+
+  // Headlight glow
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = '#ffffff';
+  ctx.shadowBlur  = 18;
+  ctx.beginPath();
+  ctx.ellipse(0, -BIKE_H/2+8, 5, 3.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+function drawSpeedLines() {
+  const intensity = Math.min(1, (gameSpeed - 7) / 10);
+  if (intensity <= 0) return;
+
+  ctx.strokeStyle = `rgba(255,255,255,${intensity * 0.25})`;
+  ctx.lineWidth = 1;
+
+  const count = Math.floor(intensity * 22);
+  for (let i = 0; i < count; i++) {
+    const side = Math.random() < 0.5;
+    const x = side
+      ? Math.random() * (ROAD_L - 10)
+      : ROAD_R + 10 + Math.random() * (canvas.width - ROAD_R - 10);
+    const y   = Math.random() * canvas.height;
+    const len = 18 + Math.random() * 35;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y + len);
+    ctx.stroke();
+  }
+}
+
+function drawMenu() {
+  // Dim
+  ctx.fillStyle = 'rgba(5,5,15,0.78)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.textAlign = 'center';
+
+  // Title
+  ctx.font = `bold 64px 'Bebas Neue', sans-serif`;
+  ctx.fillStyle = '#00ccff';
+  ctx.shadowColor = '#00ccff';
+  ctx.shadowBlur  = 30;
+  ctx.fillText('TILTRIDE', canvas.width / 2, 260);
+  ctx.shadowBlur = 0;
+
+  ctx.font = `14px 'Share Tech Mono', monospace`;
+  ctx.fillStyle = '#445577';
+  ctx.fillText('tilt your macbook to steer', canvas.width / 2, 300);
+
+  // Prompt
+  ctx.font = `13px 'Share Tech Mono', monospace`;
+  const blink = Math.floor(Date.now() / 600) % 2;
+  ctx.fillStyle = blink ? '#00ccff' : '#336688';
+  ctx.fillText('[ SPACE ] or click to start', canvas.width / 2, 380);
+
+  ctx.textAlign = 'left';
+}
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(5,5,15,0.82)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.textAlign = 'center';
+
+  ctx.font = `bold 58px 'Bebas Neue', sans-serif`;
+  ctx.fillStyle = '#ff4444';
+  ctx.shadowColor = '#ff0000';
+  ctx.shadowBlur  = 24;
+  ctx.fillText('GAME OVER', canvas.width / 2, 260);
+  ctx.shadowBlur = 0;
+
+  ctx.font = `20px 'Bebas Neue', sans-serif`;
+  ctx.fillStyle = '#8899bb';
+  ctx.fillText(`SCORE  ${score.toLocaleString()}`, canvas.width / 2, 310);
+
+  const blink = Math.floor(Date.now() / 600) % 2;
+  ctx.font = `13px 'Share Tech Mono', monospace`;
+  ctx.fillStyle = blink ? '#00ccff' : '#336688';
+  ctx.fillText('[ SPACE ] or click to restart', canvas.width / 2, 370);
+
+  ctx.textAlign = 'left';
+}
+
+// ── HUD panel (DOM) ───────────────────────────────────────────────────────────
+function updateHUD() {
+  document.getElementById('spd').textContent = Math.round(gameSpeed * 22);
+  document.getElementById('scr').textContent = score.toLocaleString();
+
+  // Lives
+  for (let i = 1; i <= 3; i++) {
+    document.getElementById(`l${i}`).className =
+      'life-icon' + (i <= lives ? '' : ' dead');
+  }
+
+  // Tilt meter
+  const MAX_DISP = 30;
+  const norm = Math.max(-1, Math.min(1, tiltAngle / MAX_DISP)); // -1..1
+  const pct  = (norm + 1) / 2;                                  //  0..1
+
+  const bar = document.getElementById('tilt-bar-fill');
+  const dot = document.getElementById('tilt-dot');
+  // Fill from center to dot position
+  const center = 50;
+  const pos    = pct * 100;
+  if (pos >= center) {
+    bar.style.left  = center + '%';
+    bar.style.width = (pos - center) + '%';
+  } else {
+    bar.style.left  = pos + '%';
+    bar.style.width = (center - pos) + '%';
+  }
+  dot.style.left = pos + '%';
+
+  document.getElementById('tilt-val').textContent =
+    imuConnected ? `${tiltAngle >= 0 ? '+' : ''}${tiltAngle.toFixed(1)}°` : '—';
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+function loop() {
+  update();
+
+  // Draw
+  drawBackground();
+  drawRoad();
+  drawSpeedLines();
+  for (const c of cars) drawCar(c);
+  if (state === STATES.PLAYING || state === STATES.GAMEOVER) drawBike();
+
+  if (state === STATES.MENU)     drawMenu();
+  if (state === STATES.GAMEOVER) drawGameOver();
+
+  updateHUD();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
