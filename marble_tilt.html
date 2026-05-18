@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MarbleTilt</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #03030c;
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  #wrap { display: flex; gap: 28px; align-items: flex-start; }
+
+  canvas {
+    display: block;
+    border: 1px solid #0f0f2a;
+    box-shadow: 0 0 80px rgba(70,30,200,0.06), 0 0 2px rgba(100,80,255,0.18);
+    transition: transform 0.06s ease-out;
+  }
+
+  /* ── Panel ── */
+  #panel {
+    width: 180px; display: flex; flex-direction: column; gap: 18px;
+    padding-top: 4px; font-size: 11px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .stat-block { display: flex; flex-direction: column; gap: 4px; }
+  .stat-label { color: #2e2e50; font-size: 10px; }
+  .stat-value {
+    font-family: 'Bebas Neue', monospace; font-size: 36px;
+    color: #44ee99; line-height: 1; letter-spacing: 0.04em;
+    text-shadow: 0 0 18px rgba(40,220,130,0.35);
+  }
+  .stat-unit { font-size: 10px; color: #333350; margin-top: -2px; }
+  .divider   { height: 1px; background: #0c0c22; }
+
+  /* Level pips */
+  #level-pips { display: flex; gap: 8px; align-items: center; }
+  .pip {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #0d0d22; border: 1px solid #1c1c3a; transition: all 0.3s;
+  }
+  .pip.active { background: #7733ff; box-shadow: 0 0 8px #7733ff; border-color: #7733ff; }
+  .pip.done   { background: #44ee99; box-shadow: 0 0 8px #44ee99; border-color: #44ee99; }
+
+  /* IMU dot */
+  #imu-status { display: flex; align-items: center; gap: 8px; font-size: 10px; color: #445; }
+  #imu-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #bb2222; box-shadow: 0 0 8px #bb2222;
+    flex-shrink: 0; transition: all 0.3s;
+  }
+  #imu-dot.on { background: #44ee99; box-shadow: 0 0 8px #44ee99; }
+
+  /* Tilt bars */
+  .tilt-block { display: flex; flex-direction: column; gap: 8px; }
+  .tilt-row   { display: flex; flex-direction: column; gap: 4px; }
+  .tilt-mini  { font-size: 9px; color: #222240; }
+  .tbar {
+    height: 5px; background: #080818; border-radius: 3px;
+    border: 1px solid #121230; position: relative; overflow: visible;
+  }
+  .tbar-fill {
+    position: absolute; top: 0; height: 100%; border-radius: 3px;
+  }
+  .tbar-fill.x { background: #7733ff; }
+  .tbar-fill.y { background: #ff6633; }
+  .tbar-ctr  { position: absolute; left:50%; top:-3px; width:1px; height:11px; background:#1a1a38; }
+  .tbar-dot  {
+    position: absolute; top:50%; transform: translateY(-50%);
+    width:9px; height:9px; border-radius:50%; margin-left:-4.5px;
+  }
+  .tbar-dot.x { background:#7733ff; box-shadow: 0 0 6px #7733ff; }
+  .tbar-dot.y { background:#ff6633; box-shadow: 0 0 6px #ff6633; }
+
+  /* Buttons */
+  .ctrl-btn {
+    background: #070716; border: 1px solid #131330;
+    color: #333355; font-family: 'Share Tech Mono', monospace;
+    font-size: 10px; padding: 5px 10px; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    border-radius: 2px; transition: all 0.2s; width: 100%;
+  }
+  .ctrl-btn:hover   { border-color: #7733ff55; color: #7733ff; }
+  .ctrl-btn.toggled { border-color: #7733ff; color: #7733ff; }
+
+  #hint { font-size: 9px; color: #1e1e38; line-height: 1.8; }
+  #hint b { color: #2e2e55; }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <canvas id="game" width="520" height="520"></canvas>
+
+  <div id="panel">
+    <div class="stat-block">
+      <div class="stat-label">Time</div>
+      <div class="stat-value" id="t-time" style="font-size:30px">0.00</div>
+      <div class="stat-unit">seconds</div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Best</div>
+      <div class="stat-value" id="t-best" style="font-size:20px; color:#222244">–</div>
+      <div class="stat-unit">this level</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+      <div class="stat-label" style="margin-bottom:8px">Level</div>
+      <div id="level-pips">
+        <div class="pip" id="pip0"></div>
+        <div class="pip" id="pip1"></div>
+        <div class="pip" id="pip2"></div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="tilt-block">
+      <div class="tilt-row">
+        <div class="tilt-mini">← Roll (X) →</div>
+        <div class="tbar">
+          <div class="tbar-ctr"></div>
+          <div class="tbar-fill x" id="tx-fill"></div>
+          <div class="tbar-dot x"  id="tx-dot"></div>
+        </div>
+      </div>
+      <div class="tilt-row">
+        <div class="tilt-mini">↑ Pitch (Y) ↓</div>
+        <div class="tbar">
+          <div class="tbar-ctr"></div>
+          <div class="tbar-fill y" id="ty-fill"></div>
+          <div class="tbar-dot y"  id="ty-dot"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div id="imu-status">
+      <div id="imu-dot"></div>
+      <span id="imu-label">Keyboard mode</span>
+    </div>
+
+    <button class="ctrl-btn" id="btn-ix" onclick="toggleInv('x')">⇄ Flip X axis</button>
+    <button class="ctrl-btn" id="btn-iy" onclick="toggleInv('y')">⇅ Flip Y axis</button>
+    <button class="ctrl-btn" onclick="resetLevel()">↺ Restart level</button>
+
+    <div id="hint">
+      <b>TILT</b> Mac to roll<br>
+      <b>ARROWS</b> fallback<br>
+      <b>SPACE</b> start / next<br>
+      <b>R</b> restart level
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Constants ─────────────────────────────────────────────────────────────────
+const CS  = 520;     // canvas size (square)
+const M   = 20;      // margin from canvas edge to maze
+const WT  = 5;       // wall thickness px
+const MR  = 10;      // marble radius px
+const GR  = 16;      // goal hole radius px
+const GV  = 0.40;    // gravity strength
+const FRI = 0.975;   // velocity friction per frame
+const BNC = 0.32;    // bounce energy (0 = dead stop, 1 = elastic)
+const D2R = Math.PI / 180;
+
+// Level configs — maze always fits in 480×480 (= CS - 2*M)
+const LEVELS = [
+  { cols: 8,  rows: 8,  cell: 60, seed: 31337  },
+  { cols: 10, rows: 10, cell: 48, seed: 109114 },
+  { cols: 12, rows: 12, cell: 40, seed: 186891 },
+];
+
+// ── Canvas ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+
+// ── Game state ────────────────────────────────────────────────────────────────
+let state    = 'MENU'; // MENU | PLAYING | WIN_ANIM | LEVEL_DONE | ALL_DONE
+let levelIdx = 0;
+
+let walls  = [];
+let goal   = { x: 0, y: 0 };
+let origin = { x: 0, y: 0 }; // start position
+
+let marble = { x: 0, y: 0, vx: 0, vy: 0, scale: 1 };
+
+let timerStart = 0;
+let timerNow   = 0;
+let bestTimes  = [Infinity, Infinity, Infinity];
+let totalTime  = 0;
+
+let winT      = 0;
+let doneStamp = 0;
+
+let particles = [];
+
+// ── Input ─────────────────────────────────────────────────────────────────────
+let roll = 0, pitch = 0;
+let imuConn = false;
+let invX = 1, invY = 1;
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === ' ')              onSpace();
+  if (e.key === 'r' || e.key === 'R') resetLevel();
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+canvas.addEventListener('click', onSpace);
+
+function toggleInv(axis) {
+  if (axis === 'x') { invX *= -1; document.getElementById('btn-ix').classList.toggle('toggled'); }
+  else              { invY *= -1; document.getElementById('btn-iy').classList.toggle('toggled'); }
+}
+
+function onSpace() {
+  if (state === 'MENU')     initLevel(0);
+  if (state === 'ALL_DONE') { totalTime = 0; bestTimes = [Infinity, Infinity, Infinity]; initLevel(0); }
+}
+
+function resetLevel() {
+  if (state === 'PLAYING' || state === 'WIN_ANIM') initLevel(levelIdx);
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connectWS() {
+  const ws = new WebSocket('ws://localhost:8765');
+  ws.onopen = () => {
+    imuConn = true;
+    document.getElementById('imu-dot').classList.add('on');
+    document.getElementById('imu-label').textContent = 'IMU connected';
+  };
+  ws.onmessage = e => {
+    try { const d = JSON.parse(e.data); roll = d.roll; pitch = d.pitch; } catch {}
+  };
+  ws.onclose = ws.onerror = () => {
+    imuConn = false;
+    document.getElementById('imu-dot').classList.remove('on');
+    document.getElementById('imu-label').textContent = 'Keyboard mode';
+    setTimeout(connectWS, 2500);
+  };
+}
+connectWS();
+
+// ── Maze generation (iterative DFS, perfect maze) ─────────────────────────────
+function generateMaze(cols, rows, seed) {
+  // Deterministic LCG
+  let s = (seed ^ 0x9e3779b9) >>> 0;
+  const rng = () => {
+    s = Math.imul(s ^ (s >>> 16), 0x45d9f3b);
+    s = Math.imul(s ^ (s >>> 16), 0x45d9f3b);
+    return ((s ^ (s >>> 16)) >>> 0) / 0x100000000;
+  };
+
+  const G = Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => ({ N: true, S: true, E: true, W: true }))
+  );
+  const vis = Array.from({ length: rows }, () => new Uint8Array(cols));
+
+  const DIRS = [
+    { dr: -1, dc: 0,  w: 'N', o: 'S' },
+    { dr:  1, dc: 0,  w: 'S', o: 'N' },
+    { dr:  0, dc: -1, w: 'W', o: 'E' },
+    { dr:  0, dc:  1, w: 'E', o: 'W' },
+  ];
+
+  const stack = [[0, 0]];
+  vis[0][0] = 1;
+
+  while (stack.length) {
+    const [r, c] = stack[stack.length - 1];
+    const dirs = [...DIRS].sort(() => rng() - 0.5);
+    let moved = false;
+    for (const { dr, dc, w, o } of dirs) {
+      const nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !vis[nr][nc]) {
+        G[r][c][w]   = false;
+        G[nr][nc][o] = false;
+        vis[nr][nc]  = 1;
+        stack.push([nr, nc]);
+        moved = true;
+        break;
+      }
+    }
+    if (!moved) stack.pop();
+  }
+  return G;
+}
+
+// ── Wall rect list from maze grid ─────────────────────────────────────────────
+function buildWalls(G, cfg) {
+  const { cols, rows, cell } = cfg;
+  const ox = M, oy = M;
+  const T = WT, H = T / 2;
+  const out = [];
+
+  // Outer border
+  out.push({ x: ox - T,           y: oy - T,           w: cols * cell + 2 * T, h: T            }); // top
+  out.push({ x: ox - T,           y: oy + rows * cell, w: cols * cell + 2 * T, h: T            }); // bottom
+  out.push({ x: ox - T,           y: oy,               w: T,                   h: rows * cell  }); // left
+  out.push({ x: ox + cols * cell, y: oy,               w: T,                   h: rows * cell  }); // right
+
+  // Interior walls (deduplicated: only S and E of each cell)
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cx = ox + c * cell, cy = oy + r * cell;
+      if (G[r][c].S && r < rows - 1)
+        out.push({ x: cx - H, y: cy + cell - H, w: cell + T, h: T });
+      if (G[r][c].E && c < cols - 1)
+        out.push({ x: cx + cell - H, y: cy - H, w: T, h: cell + T });
+    }
+  }
+  return out;
+}
+
+// ── Level init ────────────────────────────────────────────────────────────────
+function initLevel(idx) {
+  levelIdx = idx;
+  const cfg  = LEVELS[idx];
+  const grid = generateMaze(cfg.cols, cfg.rows, cfg.seed);
+  walls      = buildWalls(grid, cfg);
+
+  origin = { x: M + cfg.cell / 2,               y: M + cfg.cell / 2               };
+  goal   = { x: M + (cfg.cols - 0.5) * cfg.cell, y: M + (cfg.rows - 0.5) * cfg.cell };
+
+  marble    = { x: origin.x, y: origin.y, vx: 0, vy: 0, scale: 1 };
+  particles = [];
+  timerStart = Date.now();
+  timerNow   = 0;
+  winT       = 0;
+  state      = 'PLAYING';
+}
+
+// ── Physics ───────────────────────────────────────────────────────────────────
+function resolveWalls() {
+  for (const w of walls) {
+    const nearX = Math.max(w.x, Math.min(marble.x, w.x + w.w));
+    const nearY = Math.max(w.y, Math.min(marble.y, w.y + w.h));
+    const dx = marble.x - nearX;
+    const dy = marble.y - nearY;
+    const d2 = dx * dx + dy * dy;
+    if (d2 === 0 || d2 >= MR * MR) continue;
+    const d  = Math.sqrt(d2);
+    const nx = dx / d, ny = dy / d;
+    marble.x += nx * (MR - d);
+    marble.y += ny * (MR - d);
+    const dot = marble.vx * nx + marble.vy * ny;
+    if (dot < 0) {
+      marble.vx -= (1 + BNC) * dot * nx;
+      marble.vy -= (1 + BNC) * dot * ny;
+    }
+  }
+}
+
+// ── Update ────────────────────────────────────────────────────────────────────
+function update() {
+  if (state === 'PLAYING') {
+    // Acceleration from tilt (or keyboard)
+    let ax = 0, ay = 0;
+    if (imuConn) {
+      ax = Math.sin(roll  * D2R) * GV * invX;
+      ay = Math.sin(pitch * D2R) * GV * invY;
+    } else {
+      if (keys['ArrowLeft'])  ax = -GV;
+      if (keys['ArrowRight']) ax =  GV;
+      if (keys['ArrowUp'])    ay = -GV;
+      if (keys['ArrowDown'])  ay =  GV;
+    }
+
+    marble.vx = marble.vx * FRI + ax;
+    marble.vy = marble.vy * FRI + ay;
+    marble.x += marble.vx;
+    marble.y += marble.vy;
+    resolveWalls();
+
+    // Particle trail when fast
+    const spd = Math.hypot(marble.vx, marble.vy);
+    if (spd > 2.8 && Math.random() < 0.45) {
+      particles.push({
+        x: marble.x, y: marble.y,
+        vx: (Math.random() - 0.5) * 1.2 - marble.vx * 0.12,
+        vy: (Math.random() - 0.5) * 1.2 - marble.vy * 0.12,
+        life: 1, r: MR * (0.15 + Math.random() * 0.25),
+      });
+    }
+
+    timerNow = (Date.now() - timerStart) / 1000;
+
+    // Win condition
+    if (Math.hypot(marble.x - goal.x, marble.y - goal.y) < GR - MR * 0.4) {
+      if (timerNow < bestTimes[levelIdx]) bestTimes[levelIdx] = timerNow;
+      totalTime += timerNow;
+      winT  = 0;
+      state = 'WIN_ANIM';
+    }
+  }
+
+  if (state === 'WIN_ANIM') {
+    winT += 0.024;
+    marble.scale = Math.max(0, 1 - winT * winT);
+    marble.x += (goal.x - marble.x) * 0.16;
+    marble.y += (goal.y - marble.y) * 0.16;
+    marble.vx = marble.vy = 0;
+    if (winT >= 1) { state = 'LEVEL_DONE'; doneStamp = Date.now(); }
+  }
+
+  if (state === 'LEVEL_DONE') {
+    if (Date.now() - doneStamp > 2000) {
+      if (levelIdx < LEVELS.length - 1) initLevel(levelIdx + 1);
+      else state = 'ALL_DONE';
+    }
+  }
+
+  // Age particles
+  for (const p of particles) { p.x += p.vx; p.y += p.vy; p.life -= 0.055; }
+  particles = particles.filter(p => p.life > 0);
+
+  // CSS 3D tilt (purely visual, doesn't affect collision)
+  const rx = Math.max(-9, Math.min(9, -pitch * invY * 0.24));
+  const ry = Math.max(-9, Math.min(9,  roll  * invX * 0.24));
+  canvas.style.transform = `perspective(950px) rotateX(${rx}deg) rotateY(${ry}deg)`;
+}
+
+// ── Draw: board ───────────────────────────────────────────────────────────────
+function drawBoard() {
+  ctx.fillStyle = '#04040f';
+  ctx.fillRect(0, 0, CS, CS);
+
+  // Maze floor — slightly lighter tint
+  ctx.fillStyle = '#060613';
+  ctx.fillRect(M, M, CS - 2 * M, CS - 2 * M);
+
+  // Subtle dot grid
+  ctx.fillStyle = 'rgba(200,180,255,0.022)';
+  for (let x = M; x <= CS - M; x += 20)
+    for (let y = M; y <= CS - M; y += 20)
+      ctx.fillRect(x - 0.5, y - 0.5, 1, 1);
+}
+
+// ── Draw: walls ───────────────────────────────────────────────────────────────
+function drawWalls() {
+  for (const w of walls) {
+    // Base colour — dark raised ridge
+    ctx.fillStyle = '#19193a';
+    ctx.fillRect(w.x, w.y, w.w, w.h);
+
+    const horiz = w.w > w.h;
+
+    // Top / left bevel (light)
+    ctx.fillStyle = 'rgba(160,130,255,0.09)';
+    horiz
+      ? ctx.fillRect(w.x, w.y, w.w, 1.5)
+      : ctx.fillRect(w.x, w.y, 1.5, w.h);
+
+    // Bottom / right bevel (shadow)
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    horiz
+      ? ctx.fillRect(w.x, w.y + w.h - 1.5, w.w, 1.5)
+      : ctx.fillRect(w.x + w.w - 1.5, w.y, 1.5, w.h);
+  }
+}
+
+// ── Draw: goal hole ───────────────────────────────────────────────────────────
+function drawGoal() {
+  const { x, y } = goal;
+  const t = Date.now();
+  const pulse = (Math.sin(t * 0.0045) + 1) / 2;
+
+  // Ambient glow
+  const glow = ctx.createRadialGradient(x, y, 0, x, y, GR * 3.2);
+  glow.addColorStop(0,   `rgba(40,220,130,${0.28 + pulse * 0.14})`);
+  glow.addColorStop(0.5, 'rgba(40,220,130,0.06)');
+  glow.addColorStop(1,   'rgba(40,220,130,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(x, y, GR * 3.2, 0, Math.PI * 2); ctx.fill();
+
+  // The hole (dark void)
+  const hole = ctx.createRadialGradient(x, y, 0, x, y, GR);
+  hole.addColorStop(0,   '#000000');
+  hole.addColorStop(0.6, '#001208');
+  hole.addColorStop(1,   '#002e15');
+  ctx.fillStyle = hole;
+  ctx.beginPath(); ctx.arc(x, y, GR, 0, Math.PI * 2); ctx.fill();
+
+  // Glowing rim
+  ctx.strokeStyle = `rgba(50,240,140,${0.55 + pulse * 0.45})`;
+  ctx.lineWidth   = 2;
+  ctx.shadowColor = '#44ee99';
+  ctx.shadowBlur  = 10 + pulse * 10;
+  ctx.beginPath(); ctx.arc(x, y, GR, 0, Math.PI * 2); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Outer pulsing ring
+  ctx.strokeStyle = `rgba(50,240,140,${0.12 + pulse * 0.18})`;
+  ctx.lineWidth   = 1;
+  ctx.beginPath(); ctx.arc(x, y, GR + 5 + pulse * 10, 0, Math.PI * 2); ctx.stroke();
+}
+
+// ── Draw: start marker ────────────────────────────────────────────────────────
+function drawStart() {
+  ctx.strokeStyle = 'rgba(100,70,220,0.22)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(origin.x, origin.y, MR + 5, 0, Math.PI * 2); ctx.stroke();
+}
+
+// ── Draw: particle trail ──────────────────────────────────────────────────────
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = p.life * 0.45;
+    ctx.fillStyle   = '#aabbff';
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ── Draw: marble ──────────────────────────────────────────────────────────────
+function drawMarble() {
+  const { x, y, scale } = marble;
+  if (scale <= 0.01) return;
+  const r = MR * scale;
+
+  ctx.save();
+
+  // Drop shadow
+  ctx.shadowColor   = 'rgba(0,0,0,0.75)';
+  ctx.shadowBlur    = 18 * scale;
+  ctx.shadowOffsetY = 5 * scale;
+
+  // Sphere gradient — chrome/steel
+  const body = ctx.createRadialGradient(
+    x - r * 0.30, y - r * 0.33, r * 0.04,
+    x,            y,            r
+  );
+  body.addColorStop(0,    '#eef6ff');
+  body.addColorStop(0.22, '#99ccee');
+  body.addColorStop(0.62, '#2277bb');
+  body.addColorStop(1,    '#0a2d50');
+
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+
+  ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+
+  // Specular highlight
+  const spec = ctx.createRadialGradient(
+    x - r * 0.28, y - r * 0.34, 0,
+    x - r * 0.28, y - r * 0.34, r * 0.62
+  );
+  spec.addColorStop(0,   'rgba(255,255,255,0.90)');
+  spec.addColorStop(0.45,'rgba(255,255,255,0.22)');
+  spec.addColorStop(1,   'rgba(255,255,255,0)');
+  ctx.fillStyle = spec;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+
+  ctx.restore();
+}
+
+// ── Draw: overlays ────────────────────────────────────────────────────────────
+function drawOverlay() {
+  if (state === 'MENU') {
+    ctx.fillStyle = 'rgba(3,3,12,0.83)';
+    ctx.fillRect(0, 0, CS, CS);
+    ctx.textAlign = 'center';
+
+    ctx.font      = `bold 66px 'Bebas Neue', sans-serif`;
+    ctx.fillStyle = '#44ee99';
+    ctx.shadowColor = '#44ee99'; ctx.shadowBlur = 30;
+    ctx.fillText('MARBLETILT', CS / 2, 234);
+    ctx.shadowBlur = 0;
+
+    ctx.font      = `12px 'Share Tech Mono', monospace`;
+    ctx.fillStyle = '#222248';
+    ctx.fillText('tilt your mac  ·  roll the marble  ·  find the hole', CS / 2, 274);
+
+    const blink = Math.floor(Date.now() / 560) % 2;
+    ctx.font      = `12px 'Share Tech Mono', monospace`;
+    ctx.fillStyle = blink ? '#44ee99' : '#1a3325';
+    ctx.fillText('[ SPACE ] or click to start', CS / 2, 344);
+    ctx.textAlign = 'left';
+  }
+
+  if (state === 'LEVEL_DONE') {
+    ctx.fillStyle = 'rgba(3,3,12,0.80)';
+    ctx.fillRect(0, 0, CS, CS);
+    ctx.textAlign = 'center';
+
+    ctx.font = `bold 52px 'Bebas Neue', sans-serif`;
+    ctx.fillStyle = '#44ee99';
+    ctx.shadowColor = '#44ee99'; ctx.shadowBlur = 22;
+    ctx.fillText(`LEVEL  ${levelIdx + 1}  CLEAR`, CS / 2, 230);
+    ctx.shadowBlur = 0;
+
+    const best = bestTimes[levelIdx];
+    ctx.font      = `22px 'Bebas Neue', sans-serif`;
+    ctx.fillStyle = '#aabbcc';
+    ctx.fillText(best < Infinity ? best.toFixed(2) + 's' : '–', CS / 2, 278);
+
+    ctx.font      = `11px 'Share Tech Mono', monospace`;
+    ctx.fillStyle = '#1a1a38';
+    ctx.fillText(
+      levelIdx < LEVELS.length - 1 ? 'next level loading…' : 'finishing up…',
+      CS / 2, 338
+    );
+    ctx.textAlign = 'left';
+  }
+
+  if (state === 'ALL_DONE') {
+    ctx.fillStyle = 'rgba(3,3,12,0.90)';
+    ctx.fillRect(0, 0, CS, CS);
+    ctx.textAlign = 'center';
+
+    ctx.font = `bold 56px 'Bebas Neue', sans-serif`;
+    ctx.fillStyle = '#44ee99';
+    ctx.shadowColor = '#44ee99'; ctx.shadowBlur = 28;
+    ctx.fillText('ALL  CLEAR', CS / 2, 210);
+    ctx.shadowBlur = 0;
+
+    ctx.font      = `12px 'Share Tech Mono', monospace`;
+    ctx.fillStyle = '#334466';
+    ctx.fillText('total time', CS / 2, 260);
+
+    ctx.font      = `bold 50px 'Bebas Neue', sans-serif`;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`${totalTime.toFixed(2)}s`, CS / 2, 314);
+
+    // Best per level
+    bestTimes.forEach((t, i) => {
+      ctx.font      = `11px 'Share Tech Mono', monospace`;
+      ctx.fillStyle = '#223344';
+      ctx.fillText(
+        `LVL ${i + 1} — ${t < Infinity ? t.toFixed(2) + 's' : '–'}`,
+        CS / 2, 354 + i * 22
+      );
+    });
+
+    const blink = Math.floor(Date.now() / 600) % 2;
+    ctx.font      = `12px 'Share Tech Mono', monospace`;
+    ctx.fillStyle = blink ? '#44ee99' : '#1a3325';
+    ctx.fillText('[ SPACE ] to play again', CS / 2, 442);
+    ctx.textAlign = 'left';
+  }
+}
+
+// ── HUD update ────────────────────────────────────────────────────────────────
+function updateHUD() {
+  document.getElementById('t-time').textContent = timerNow.toFixed(2);
+  const b = bestTimes[levelIdx];
+  document.getElementById('t-best').textContent = b < Infinity ? b.toFixed(2) + 's' : '–';
+
+  for (let i = 0; i < 3; i++) {
+    const p = document.getElementById(`pip${i}`);
+    p.className = 'pip' + (i < levelIdx ? ' done' : i === levelIdx && state !== 'MENU' ? ' active' : '');
+  }
+
+  setTiltBar('x', roll  * invX);
+  setTiltBar('y', pitch * invY);
+}
+
+function setTiltBar(axis, val) {
+  const MAX  = 30;
+  const norm = Math.max(-1, Math.min(1, val / MAX));
+  const pct  = (norm + 1) / 2 * 100;
+  const fill = document.getElementById(`t${axis}-fill`);
+  const dot  = document.getElementById(`t${axis}-dot`);
+  const c    = 50;
+  fill.style.left  = (pct >= c ? c : pct) + '%';
+  fill.style.width = Math.abs(pct - c) + '%';
+  dot.style.left   = pct + '%';
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+function loop() {
+  update();
+
+  drawBoard();
+  drawWalls();
+
+  if (state !== 'MENU') {
+    drawGoal();
+    drawStart();
+    drawParticles();
+    drawMarble();
+  }
+
+  drawOverlay();
+  updateHUD();
+
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
